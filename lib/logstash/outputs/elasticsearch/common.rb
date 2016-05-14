@@ -79,25 +79,33 @@ module LogStash; module Outputs; class ElasticSearch;
       # %{num} will contain the index number
       index_pattern = Regexp.new(@index.gsub '%{num}', '(\d+)')
 
-      cur_num = nil
-      cur_size = nil
+      latest_num = -1
+      latest_size = nil
       stats['indices'].each do |index,store|
         if index =~ index_pattern
           cur_num = $1.to_i
-          cur_size = store['total']['store']['size_in_bytes']
-          break
+          if cur_num > latest_num
+            latest_num = cur_num
+            latest_size = store['total']['store']['size_in_bytes']
+          end
         end
       end
 
-      index_fmt = @index.gsub '%{num}', '%d'
       num = nil
-      if cur_num != nil && cur_size > @index_max_size
-        # TODO
-        num = cur_num + 1
-        @logger.info("Size-based index rotation, max size reached for %s. Moving to number %d." % [ @cur_index, num ])
-      elsif cur_num == nil && @cur_index == nil
+      index_fmt = @index.gsub '%{num}', '%d'
+      if latest_num != nil
+        if latest_size >= @index_max_size
+          num = latest_num + 1
+          @logger.info("Size-based index rotation, max size reached for %s. Moving to number %d." % [ @cur_index, num ])
+        elsif @cur_index == nil
+          num = latest_num
+          @logger.info("Size-based index rotation, initial number found for %s. Starting with number %d." % [ @cur_index, num ])
+        end
+      elsif latest_num == nil && @cur_index == nil
         num = @size_rotation_start_at
         @logger.info("Size-based index rotation, starting with default/provided index number: %d" % [ num ])
+      else
+        @logger.info("not setting num for @cur_index")
       end
 
       if num != nil
