@@ -133,6 +133,23 @@ class LogStash::Outputs::ElasticSearch < LogStash::Outputs::Base
   # `{ 'X-My-Header-Here': 'val123', ... }`
   config :headers, :validate => :hash
 
+  # This setting causes indices to be rotated based upon size rather than the default
+  # time/date-based rotation.
+  # Index format must include %{num}. In this way, `myindex-%{num}` would produce indices
+  # `myindex-1`, followed by `myindex-2`, ... when the respective size limit is reached.
+  config :size_rotation_enabled, :validate => :boolean, :default => false
+
+  # Max size of an index, used by size rotation, in bytes (e.g. "2048", "10mb", "1GiB").
+  # Defaults to "1GiB".
+  config :index_max_bytes, :validate => :bytes, :default => "1GiB"
+
+  # Set the interval for index size checks (seconds). Defaults to 10.
+  config :size_check_interval, :validate => :number, :default => 10
+
+  # When size-based rotation is neabled, the index number with which to start. Default: 1.
+  config :size_rotation_start_at, :validate => :number, :default => 1
+
+
   def build_client
     @client = ::LogStash::Outputs::ElasticSearch::HttpClientBuilder.build(@logger, @hosts, params)
   end

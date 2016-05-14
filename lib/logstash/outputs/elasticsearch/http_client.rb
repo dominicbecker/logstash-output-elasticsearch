@@ -53,6 +53,10 @@ module LogStash; module Outputs; class ElasticSearch;
       @client.bulk(:body => bulk_body)
     end
 
+    def store_stats()
+      @client.indices.stats store: true
+    end
+
     def start_sniffing!
       if options[:sniffing]
         @sniffer_thread = Thread.new do
