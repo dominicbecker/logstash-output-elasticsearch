@@ -15,6 +15,7 @@ module LogStash; module Outputs; class ElasticSearch;
       install_template
       setup_buffer_and_handler
       check_action_validity
+      setup_size_checker
 
       @logger.info("New Elasticsearch output", :class => self.class.name, :hosts => @hosts)
     end
@@ -56,6 +57,72 @@ module LogStash; module Outputs; class ElasticSearch;
     def setup_buffer_and_handler
       @buffer = ::LogStash::Outputs::ElasticSearch::Buffer.new(@logger, @flush_size, @idle_flush_time) do |actions|
         retrying_submit(actions)
+      end
+    end
+
+    def setup_size_checker
+      if @size_rotation_enabled
+        if @index !~ /\%\{num\}/
+          raise LogStash::ConfigurationError, "Size-rotation enabled, but index pattern missing '%{num}'"
+        end
+        if !@size_check_interval.is_a?(Integer) || @size_check_interval <= 0
+          raise LogStash::ConfigurationError, "size_check_interval must be a positive integer"
+        end
+        if !@size_rotation_start_at.is_a?(Integer) || @size_rotation_start_at <= 0
+          raise LogStash::ConfigurationError, "size_rotation_start_at must be a positive integer"
+        end
+        do_size_check
+        @size_check_thread = spawn_size_checker
+      end
+    end
+
+    def do_size_check
+      @logger.info("Querying stats for size checker")
+      stats = @client.store_stats
+
+      # %{num} will contain the index number
+      index_pattern = Regexp.new(@index.gsub '%{num}', '(\d+)')
+      index_fmt = @index.gsub '%{num}', '%d'
+
+      # determine current index number
+      latest_num = @size_rotation_start_at
+      latest_size = nil
+      stats['indices'].each do |index,store|
+        if index =~ index_pattern
+          cur_num = $1.to_i
+          if cur_num >= latest_num
+            latest_num = cur_num
+            latest_size = store['total']['store']['size_in_bytes']
+          end
+        end
+      end
+
+      # determine whether we should change index number to next
+      # if so, update @cur_index
+      num = nil
+      if latest_size != nil && latest_size >= @index_max_bytes
+        num = latest_num + 1
+        @logger.info("Size-based index rotation, max size reached for %s. Moving to number %d." % [ @cur_index, num ])
+      elsif @cur_index == nil
+        num = latest_num
+        @logger.info("Size-based index rotation, initial number found for %s. Starting with number %d." % [ @index, num ])
+      else
+        @logger.info("not setting num for @cur_index")
+      end
+
+      if num != nil
+        @logger.info("Updating size-based index rotation index pattern")
+        @cur_index = index_fmt % [ num ]
+      end
+    end
+
+    def spawn_size_checker
+      Thread.new do
+        loop do
+          sleep @size_check_interval
+          break if @stopping.true?
+          do_size_check
+        end
       end
     end
 
@@ -127,9 +194,18 @@ module LogStash; module Outputs; class ElasticSearch;
     def event_action_params(event)
       type = get_event_type(event)
 
+      # apply size-rotation index numbering first
+      if @cur_index != nil
+        index = @cur_index
+      else
+        index = @index
+      end
+
+      index = event.sprintf(index)
+
       params = {
         :_id => @document_id ? event.sprintf(@document_id) : nil,
-        :_index => event.sprintf(@index),
+        :_index => index,
         :_type => type,
         :_routing => @routing ? event.sprintf(@routing) : nil
       }
