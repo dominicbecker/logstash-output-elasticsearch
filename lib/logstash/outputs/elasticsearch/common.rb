@@ -15,6 +15,7 @@ module LogStash; module Outputs; class ElasticSearch;
       install_template
       setup_buffer_and_handler
       check_action_validity
+      setup_size_checker
 
       @logger.info("New Elasticsearch output", :class => self.class.name, :hosts => @hosts)
     end
@@ -56,6 +57,62 @@ module LogStash; module Outputs; class ElasticSearch;
     def setup_buffer_and_handler
       @buffer = ::LogStash::Outputs::ElasticSearch::Buffer.new(@logger, @flush_size, @idle_flush_time) do |actions|
         retrying_submit(actions)
+      end
+    end
+
+    def setup_size_checker
+      @size_check_interval = 10  # seconds
+      @size_rotation_start_at = 1  # TODO this is default, make it a config
+      @index_max_size = 10*1024*1024  # TODO config it. 10MB
+      do_size_check
+      @size_check_thread = spawn_size_checker
+    end
+
+    def do_size_check
+      # cat for size of indices
+      # as well as current index number
+      # if we should move on to the next, do it
+      @logger.info("Querying stats for size checker")
+      stats = @client.store_stats
+
+      # TODO validate index in config
+      # %{num} will contain the index number
+      index_pattern = Regexp.new(@index.gsub '%{num}', '(\d+)')
+
+      cur_num = nil
+      cur_size = nil
+      stats['indices'].each do |index,store|
+        if index =~ index_pattern
+          cur_num = $1.to_i
+          cur_size = store['total']['store']['size_in_bytes']
+          break
+        end
+      end
+
+      index_fmt = @index.gsub '%{num}', '%d'
+      num = nil
+      if cur_num != nil && cur_size > @index_max_size
+        # TODO
+        num = cur_num + 1
+        @logger.info("Size-based index rotation, max size reached for %s. Moving to number %d." % [ @cur_index, num ])
+      elsif cur_num == nil && @cur_index == nil
+        num = @size_rotation_start_at
+        @logger.info("Size-based index rotation, starting with default/provided index number: %d" % [ num ])
+      end
+
+      if num != nil
+        @logger.info("Updating size-based index rotation index pattern")
+        @cur_index = index_fmt % [ num ]
+      end
+    end
+
+    def spawn_size_checker
+      Thread.new do
+        loop do
+          sleep @size_check_interval
+          break if @stopping.true?
+          do_size_check
+        end
       end
     end
 
@@ -127,9 +184,15 @@ module LogStash; module Outputs; class ElasticSearch;
     def event_action_params(event)
       type = get_event_type(event)
 
+      if @cur_index != nil
+        index = @cur_index
+      else
+        index = event.sprintf(@index)
+      end
+
       params = {
         :_id => @document_id ? event.sprintf(@document_id) : nil,
-        :_index => event.sprintf(@index),
+        :_index => index,
         :_type => type,
         :_routing => @routing ? event.sprintf(@routing) : nil
       }
