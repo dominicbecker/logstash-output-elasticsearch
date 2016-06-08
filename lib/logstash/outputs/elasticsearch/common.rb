@@ -61,10 +61,7 @@ module LogStash; module Outputs; class ElasticSearch;
     end
 
     def setup_size_checker
-      if @size_rotation_enabled
-        if @index !~ /\%\{num\}/
-          raise LogStash::ConfigurationError, "Size-rotation enabled, but index pattern missing '%{num}'"
-        end
+      if @index =~ /\%\{num\}/
         if !@size_check_interval.is_a?(Integer) || @size_check_interval <= 0
           raise LogStash::ConfigurationError, "size_check_interval must be a positive integer"
         end

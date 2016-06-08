@@ -8,6 +8,9 @@ module LogStash; module Outputs; class ElasticSearch
       # For weekly indexes ISO 8601 format is recommended, eg. logstash-%{+xxxx.ww}.
       # LS uses Joda to format the index pattern from event timestamp. 
       # Joda formats are defined http://www.joda.org/joda-time/apidocs/org/joda/time/format/DateTimeFormat.html[here]. 
+      # To rotate indices based on size rather than the default time/date-based rotation:
+      # Index format must include %{num}. In this way, `myindex-%{num}` would produce indices
+      # `myindex-1`, followed by `myindex-2`, ... when the respective size limit is reached.
       mod.config :index, :validate => :string, :default => "logstash-%{+YYYY.MM.dd}"
 
       # The index type to write events to. Generally you should try to write only
