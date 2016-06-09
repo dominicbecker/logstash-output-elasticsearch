@@ -89,7 +89,7 @@ module LogStash; module Outputs; class ElasticSearch;
           cur_num = $1.to_i
           if cur_num >= latest_num
             latest_num = cur_num
-            latest_size = store['total']['store']['size_in_bytes']
+            latest_size = store['primaries']['store']['size_in_bytes']
           end
         end
       end
