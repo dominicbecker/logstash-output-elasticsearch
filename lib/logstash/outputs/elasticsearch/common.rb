@@ -79,7 +79,8 @@ module LogStash; module Outputs; class ElasticSearch;
 
       # %{num} will contain the index number
       index_pattern = Regexp.new(@index.gsub '%{num}', '(\d+)')
-      index_fmt = @index.gsub '%{num}', '%d'
+      # escape other "%" to avoid being treated as format
+      index_fmt = @index.gsub('%', '%%').gsub('%%{num}', '%d')
 
       # determine current index number
       latest_num = @size_rotation_start_at
