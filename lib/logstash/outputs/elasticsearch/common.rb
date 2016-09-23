@@ -68,7 +68,23 @@ module LogStash; module Outputs; class ElasticSearch;
         if !@size_rotation_start_at.is_a?(Integer) || @size_rotation_start_at <= 0
           raise LogStash::ConfigurationError, "size_rotation_start_at must be a positive integer"
         end
-        do_size_check
+
+        begin
+          do_size_check
+        rescue Manticore::SocketException,
+          Manticore::SocketTimeout,
+          Elasticsearch::Transport::Transport::Errors::ServiceUnavailable => e
+          @logger.error(
+            "Attempted to perform index size check in Elasticsearch configured at '#{@client.client_options[:hosts]}',"+
+              " but Elasticsearch appears to be unreachable or down!",
+            :error_message => e.message,
+            :class => e.class.name,
+            :client_config => @client.client_options,
+          )
+
+          sleep @size_check_interval
+        end
+
         @size_check_thread = spawn_size_checker
       end
     end
@@ -117,9 +133,21 @@ module LogStash; module Outputs; class ElasticSearch;
     def spawn_size_checker
       Thread.new do
         loop do
-          sleep @size_check_interval
-          break if @stopping.true?
-          do_size_check
+          begin
+            sleep @size_check_interval
+            break if @stopping.true?
+            do_size_check
+          rescue Manticore::SocketException,
+            Manticore::SocketTimeout,
+            Elasticsearch::Transport::Transport::Errors::ServiceUnavailable => e
+            @logger.error(
+              "Attempted to perform index size check in Elasticsearch configured at '#{@client.client_options[:hosts]}',"+
+                " but Elasticsearch appears to be unreachable or down!",
+              :error_message => e.message,
+              :class => e.class.name,
+              :client_config => @client.client_options,
+            )
+          end
         end
       end
     end
