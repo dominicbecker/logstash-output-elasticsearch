@@ -69,23 +69,39 @@ module LogStash; module Outputs; class ElasticSearch;
           raise LogStash::ConfigurationError, "size_rotation_start_at must be a positive integer"
         end
 
-        begin
-          do_size_check
-        rescue Manticore::SocketException,
-          Manticore::SocketTimeout,
-          Elasticsearch::Transport::Transport::Errors::ServiceUnavailable => e
-          @logger.error(
-            "Attempted to perform index size check in Elasticsearch configured at '#{@client.client_options[:hosts]}',"+
-              " but Elasticsearch appears to be unreachable or down!",
-            :error_message => e.message,
-            :class => e.class.name,
-            :client_config => @client.client_options,
-          )
-
-          sleep @size_check_interval
+        # initial size check to choose index seqno
+        loop do
+          if safe_size_check
+            break
+          else
+            # keep trying
+            # if it doesn't succeed, indexing wouldn't either
+            sleep @size_check_interval
+          end
         end
 
         @size_check_thread = spawn_size_checker
+      end
+    end
+
+    # do_size_check with exception handling
+    # returns true on success, false on failure
+    def safe_size_check
+      begin
+        do_size_check
+        return true
+      rescue Manticore::SocketException,
+        Manticore::SocketTimeout,
+        Elasticsearch::Transport::Transport::Errors::ServiceUnavailable => e
+        @logger.error(
+          "Attempted to perform index size check in Elasticsearch configured at '#{@client.client_options[:hosts]}',"+
+            " but Elasticsearch appears to be unreachable or down!",
+          :error_message => e.message,
+          :class => e.class.name,
+          :client_config => @client.client_options,
+        )
+
+        return false
       end
     end
 
@@ -133,21 +149,11 @@ module LogStash; module Outputs; class ElasticSearch;
     def spawn_size_checker
       Thread.new do
         loop do
-          begin
-            sleep @size_check_interval
-            break if @stopping.true?
-            do_size_check
-          rescue Manticore::SocketException,
-            Manticore::SocketTimeout,
-            Elasticsearch::Transport::Transport::Errors::ServiceUnavailable => e
-            @logger.error(
-              "Attempted to perform index size check in Elasticsearch configured at '#{@client.client_options[:hosts]}',"+
-                " but Elasticsearch appears to be unreachable or down!",
-              :error_message => e.message,
-              :class => e.class.name,
-              :client_config => @client.client_options,
-            )
-          end
+          sleep @size_check_interval
+          break if @stopping.true?
+          # keep running even if the check fails
+          # if it doesn't succeed, indexing shouldn't either
+          safe_size_check
         end
       end
     end
