@@ -130,17 +130,12 @@ module LogStash; module Outputs; class ElasticSearch;
       # determine whether we should change index number to next
       # if so, update @cur_index
       num = nil
-      if latest_num != nil
-          if latest_size != nil && latest_size >= @index_max_bytes
-            num = latest_num + 1
-            @logger.info("Size-based index rotation, max size reached for %s. Moving to number %d." % [ @cur_index, num ])
-          else
-            num = latest_num
-            @logger.info("Size-based index rotation, latest number exists (or first index to be created) for %s. Using number %d." % [ @index, num ])
-          end
+      if latest_size != nil && latest_size >= @index_max_bytes
+        num = latest_num + 1
+        @logger.info("Size-based index rotation, max size reached for %s. Moving to number %d." % [ @cur_index, num ])
       else
-        # TODO shouldn't happen
-        @logger.info("not setting num for @cur_index")
+        num = latest_num
+        @logger.info("Size-based index rotation, latest number exists (or first index to be created) for %s. Using number %d." % [ @index, num ])
       end
 
       if num != nil
